@@ -51,7 +51,7 @@ class MyPortfolio:
     NOTE: You can modify the initialization function
     """
 
-    def __init__(self, price, exclude, lookback=50, gamma=0):
+    def __init__(self, price, exclude, lookback=20, gamma=0):
         self.price = price
         self.returns = price.pct_change().fillna(0)
         self.exclude = exclude
@@ -69,9 +69,49 @@ class MyPortfolio:
 
         """
         TODO: Complete Task 4 Below
+
+        Implement a very aggressive short-term momentum with trend confirmation:
+        1. Use 20-day lookback for ultra-responsive trading
+        2. Select top 2 strongest trending assets
+        3. Weight by momentum strength (not just equal or inv-vol)
+        4. Add trend confirmation to avoid whipsaws
         """
+
+        lookback = self.lookback
+        top_n = 2  # Very concentrated: top 2 only
         
-        
+        for i in range(lookback + 1, len(self.price)):
+            window_returns = self.returns[assets].iloc[i - lookback : i]
+            
+            # Multiple momentum signals
+            cum_returns = (1 + window_returns).prod() - 1  # Total return
+            recent_5d = window_returns.tail(5).sum() if len(window_returns) >= 5 else window_returns.sum()
+            
+            # Combined momentum score (emphasize recent performance)
+            momentum_score = cum_returns * 0.6 + recent_5d * 0.4
+            
+            # Get top N with strongest momentum
+            top_momentum = momentum_score.nlargest(top_n)
+            
+            if len(top_momentum) > 0 and top_momentum.min() > 0:  # Only if positive momentum
+                # Weight proportional to momentum strength
+                weights = pd.Series(0.0, index=assets)
+                weights[top_momentum.index] = top_momentum / top_momentum.sum()
+                self.portfolio_weights.loc[self.price.index[i], assets] = weights
+            else:
+                # If no strong momentum, use top 4 with inverse volatility
+                volatility = window_returns.std()
+                volatility = volatility.replace(0, volatility[volatility > 0].min())
+                inv_vol = 1.0 / volatility
+                top_inv_vol = inv_vol.nlargest(4)
+                
+                weights = pd.Series(0.0, index=assets)
+                weights[top_inv_vol.index] = top_inv_vol / top_inv_vol.sum()
+                self.portfolio_weights.loc[self.price.index[i], assets] = weights
+
+        # ensure excluded asset has zero weight
+        self.portfolio_weights[self.exclude] = 0
+
         """
         TODO: Complete Task 4 Above
         """

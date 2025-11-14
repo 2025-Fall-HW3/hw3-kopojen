@@ -61,11 +61,29 @@ class EqualWeightPortfolio:
 
         """
         TODO: Complete Task 1 Below
+
+        In an equal weight portfolio we invest the same fraction of capital in
+        each available asset (excluding the benchmark/SPY).  We set the
+        allocation on the first rebalance date and let those weights persist
+        throughout the backtest by forward filling.
         """
+
+        # compute number of investable assets (exclude SPY)
+        num_assets = len(assets)
+        if num_assets > 0:
+            weight = 1.0 / num_assets
+            # assign weights at the first date; forward fill will propagate
+            first_date = df.index[0]
+            for asset in assets:
+                self.portfolio_weights.loc[first_date, asset] = weight
+
+        # ensure excluded asset has zero weight
+        self.portfolio_weights[self.exclude] = 0
 
         """
         TODO: Complete Task 1 Above
         """
+        # forward fill and replace remaining NaNs with zeros
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
 
@@ -112,14 +130,37 @@ class RiskParityPortfolio:
 
         """
         TODO: Complete Task 2 Below
+
+        Implement the risk parity strategy.  For each rebalance date
+        (starting after the specified lookback window) we compute the
+        rolling volatility (standard deviation) of each asset's returns
+        over the lookback period and allocate weights inversely
+        proportional to these volatilities.  We normalise the weights so
+        that they sum to one and assign zero weight to the excluded
+        asset.  Missing weights on earlier dates are forward filled.
         """
 
+        lookback = self.lookback
+        # iterate over the index starting from the lookback window
+        for i in range(lookback + 1, len(df)):
+            # compute returns window for investable assets
+            window_returns = df_returns[assets].iloc[i - lookback : i]
+            # compute standard deviation for each asset; avoid division by zero
+            sigma = window_returns.std().replace(0, np.nan)
+            inv_sigma = 1.0 / sigma
+            # normalise to sum to one
+            weights = inv_sigma / inv_sigma.sum()
+            # assign weights to the current date
+            self.portfolio_weights.loc[df.index[i], assets] = weights
 
+        # ensure excluded asset has zero weight
+        self.portfolio_weights[self.exclude] = 0
 
         """
         TODO: Complete Task 2 Above
         """
 
+        # forward fill and replace remaining NaNs with zeros
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
 
@@ -186,12 +227,24 @@ class MeanVariancePortfolio:
             with gp.Model(env=env, name="portfolio") as model:
                 """
                 TODO: Complete Task 3 Below
-                """
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                Implement the mean–variance optimisation problem.  We create a
+                decision vector of weights w subject to non‑negativity and
+                budget (weights sum to one) constraints.  The objective is to
+                maximise expected return minus gamma/2 times portfolio
+                variance.
+                """
+                # Decision variables: weights bounded [0,1]
+                w = model.addMVar(n, lb=0, ub=1, name="w")
+                # Budget constraint: sum weights equals one
+                model.addConstr(w.sum() == 1, name="budget")
+                # Linear term for expected returns
+                expected_return = mu @ w
+                # Quadratic term for portfolio variance
+                portfolio_variance = w @ Sigma @ w
+                # Set the objective: maximise mean minus risk penalty
+                obj = expected_return - (gamma / 2.0) * portfolio_variance
+                model.setObjective(obj, gp.GRB.MAXIMIZE)
 
                 """
                 TODO: Complete Task 3 Above
